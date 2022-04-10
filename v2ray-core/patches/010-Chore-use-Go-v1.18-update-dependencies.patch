@@ -1,66 +1,16 @@
-From 5d87cfc5c39d322801b99001388c5f88c4748b0f Mon Sep 17 00:00:00 2001
+From 56371d87efc0fb57eb80424e968946458945167f Mon Sep 17 00:00:00 2001
 From: Loyalsoldier <10487845+Loyalsoldier@users.noreply.github.com>
 Date: Sun, 27 Mar 2022 01:43:02 +0800
-Subject: [PATCH 1/2] Chore: use Go v1.18 & update dependencies
+Subject: [PATCH] Chore: use Go v1.18 & update dependencies
 
 ---
  .github/workflows/linter.yml  |  2 +-
  .github/workflows/release.yml |  4 ++--
  .github/workflows/test.yml    |  2 +-
- go.mod                        | 23 +++++++++---------
- go.sum                        | 44 +++++++++++++++++------------------
- 5 files changed, 38 insertions(+), 37 deletions(-)
+ go.mod                        | 20 +++++++++---------
+ go.sum                        | 38 +++++++++++++++++------------------
+ 5 files changed, 32 insertions(+), 34 deletions(-)
 
-diff --git a/.github/workflows/linter.yml b/.github/workflows/linter.yml
-index 1f4a58b4..69f460c9 100644
---- a/.github/workflows/linter.yml
-+++ b/.github/workflows/linter.yml
-@@ -22,7 +22,7 @@ jobs:
-       - name: Set up Go 1.x
-         uses: actions/setup-go@v2
-         with:
--          go-version: ^1.17
-+          go-version: ^1.18
- 
-       - name: Checkout codebase
-         uses: actions/checkout@v2
-diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
-index 2f460aeb..3633bd53 100644
---- a/.github/workflows/release.yml
-+++ b/.github/workflows/release.yml
-@@ -119,7 +119,7 @@ jobs:
-       - name: Set up Go
-         uses: actions/setup-go@v2
-         with:
--          go-version: ^1.17
-+          go-version: ^1.18
- 
-       - name: Get project dependencies
-         run: go mod download
-@@ -187,7 +187,7 @@ jobs:
-       - name: Set up Go
-         uses: actions/setup-go@v2
-         with:
--          go-version: ^1.17
-+          go-version: ^1.18
- 
-       - uses: actions/download-artifact@v2
-         with:
-diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
-index 2a86ba2c..059114b8 100644
---- a/.github/workflows/test.yml
-+++ b/.github/workflows/test.yml
-@@ -30,7 +30,7 @@ jobs:
-       - name: Set up Go 1.x
-         uses: actions/setup-go@v2
-         with:
--          go-version: ^1.17
-+          go-version: ^1.18
- 
-       - name: Checkout codebase
-         uses: actions/checkout@v2
-diff --git a/go.mod b/go.mod
-index d9d96097..87752bac 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -1,6 +1,6 @@
@@ -122,11 +72,9 @@ index d9d96097..87752bac 100644
  	golang.org/x/tools v0.1.6-0.20210726203631-07bc1bf47fb2 // indirect
  	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
  	google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013 // indirect
-diff --git a/go.sum b/go.sum
-index 3a050afc..2a9ee306 100644
 --- a/go.sum
 +++ b/go.sum
-@@ -209,19 +209,20 @@ github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
+@@ -209,19 +209,20 @@ github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2
  github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
  github.com/leodido/go-urn v1.2.1 h1:BqpAaACuzVSgi/VLzGZIobT2z4v53pjosyNd9Yv6n/w=
  github.com/leodido/go-urn v1.2.1/go.mod h1:zt4jvISO2HfUBqxjfIshjdMTYS56ZS/qv49ictyFfxY=
@@ -154,7 +102,7 @@ index 3a050afc..2a9ee306 100644
  github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
  github.com/mattn/go-isatty v0.0.3/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
  github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
-@@ -298,8 +299,8 @@ github.com/russross/blackfriday v1.5.2/go.mod h1:JO/DiYxRf+HjHt06OyowR9PTA263kcR
+@@ -298,8 +299,8 @@ github.com/russross/blackfriday v1.5.2/g
  github.com/russross/blackfriday/v2 v2.0.1/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
  github.com/ryanuber/columnize v0.0.0-20160712163229-9b3edd62028f/go.mod h1:sm1tb6uqfes/u+d4ooFouqFdy9/2g9QGwK3SQygK0Ts=
  github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529/go.mod h1:DxrIzT+xaE7yg65j358z/aeFdxmN0P9QXhEzd20vsDc=
@@ -165,7 +113,7 @@ index 3a050afc..2a9ee306 100644
  github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
  github.com/shurcooL/component v0.0.0-20170202220835-f88ec8f54cc4/go.mod h1:XhFIlyj5a1fBNx5aJTbKoIq0mNaPvOagO+HjB3EtxrY=
  github.com/shurcooL/events v0.0.0-20181021180414-410e4ca65f48/go.mod h1:5u70Mqkb5O5cxEA8nxTsgrgLehJeAw6Oc4Ab1c/P1HM=
-@@ -371,12 +372,11 @@ go.opencensus.io v0.18.0/go.mod h1:vKdFvxhtzZ9onBp9VKHK8z/sRpBMnKAsufL7wlDrCOA=
+@@ -371,12 +372,11 @@ go.opencensus.io v0.18.0/go.mod h1:vKdFv
  go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
  go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
  go.opentelemetry.io/proto/otlp v0.7.0/go.mod h1:PqfVotwruBrMGOCsRd/89rSnXhoiJIqeYNgFYFoEGnI=
@@ -180,7 +128,7 @@ index 3a050afc..2a9ee306 100644
  go4.org v0.0.0-20180809161055-417644f6feb5/go.mod h1:MkTOUMDaeVYJUOUsaDXIhWPZYa1yOyC1qaOBpL57BhE=
  go4.org/intern v0.0.0-20211027215823-ae77deb06f29 h1:UXLjNohABv4S58tHmeuIZDO6e3mHpW2Dx33gaNt03LE=
  go4.org/intern v0.0.0-20211027215823-ae77deb06f29/go.mod h1:cS2ma+47FKrLPdXFpr7CuxiTW3eyJbWew4qx0qtQWDA=
-@@ -395,8 +395,8 @@ golang.org/x/crypto v0.0.0-20200221231518-2aa609cf4a9d/go.mod h1:LzIPMQfyMNhhGPh
+@@ -395,8 +395,8 @@ golang.org/x/crypto v0.0.0-2020022123151
  golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
  golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2/go.mod h1:T9bdIzuCu7OtxOm1hfPfRQxPLYneinmdGuTeoZ9dtd4=
  golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97/go.mod h1:GvvjBRRGRdwPK5ydBHafDWAxML/pGHZbMvKqRZ5+Abc=
@@ -191,7 +139,7 @@ index 3a050afc..2a9ee306 100644
  golang.org/x/exp v0.0.0-20190121172915-509febef88a4/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
  golang.org/x/exp v0.0.0-20190306152737-a1d7652674e8/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
  golang.org/x/exp v0.0.0-20190510132918-efd6b22b2522/go.mod h1:ZjyILWgesfNpC6sMxTJOJm9Kp84zZh5NQWvqDGG3Qr8=
-@@ -448,9 +448,8 @@ golang.org/x/net v0.0.0-20210226172049-e18ecbb05110/go.mod h1:m0MpNAwzfU5UDzcl9v
+@@ -448,9 +448,8 @@ golang.org/x/net v0.0.0-20210226172049-e
  golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4/go.mod h1:p54w0d4576C0XHj96bSt6lcn1PtDYWL6XObtHCRCNQM=
  golang.org/x/net v0.0.0-20210428140749-89ef3d95e781/go.mod h1:OJAsFXCWl8Ukc7SiCT/9KSuxbyM7479/AVlXFRxuMCk=
  golang.org/x/net v0.0.0-20210726213435-c6fcb2dbf985/go.mod h1:9nx3DQGgdP8bBQD5qxJ1jj9UTztislL4KSBs9R2vV5Y=
@@ -203,7 +151,7 @@ index 3a050afc..2a9ee306 100644
  golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
  golang.org/x/oauth2 v0.0.0-20181017192945-9dcd33a902f4/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
  golang.org/x/oauth2 v0.0.0-20181203162652-d668ce993890/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
-@@ -501,15 +500,16 @@ golang.org/x/sys v0.0.0-20210510120138-977fb7262007/go.mod h1:oPkhp1MJrh7nUepCBc
+@@ -501,15 +500,16 @@ golang.org/x/sys v0.0.0-20210510120138-9
  golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
  golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
  golang.org/x/sys v0.0.0-20210806184541-e5e7981a1069/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
@@ -223,7 +171,7 @@ index 3a050afc..2a9ee306 100644
  golang.org/x/time v0.0.0-20180412165947-fbb02b2291d2/go.mod h1:tRJNPiyCQ0inRvYxbN9jk5I+vvW/OXSQhTDSoE431IQ=
  golang.org/x/time v0.0.0-20181108054448-85acf8d2951c/go.mod h1:tRJNPiyCQ0inRvYxbN9jk5I+vvW/OXSQhTDSoE431IQ=
  golang.org/x/time v0.0.0-20190308202827-9d24e82272b4/go.mod h1:tRJNPiyCQ0inRvYxbN9jk5I+vvW/OXSQhTDSoE431IQ=
-@@ -602,8 +602,8 @@ google.golang.org/protobuf v1.25.0/go.mod h1:9JNX74DMeImyA3h4bdi1ymwjUzf21/xIlba
+@@ -602,8 +602,8 @@ google.golang.org/protobuf v1.25.0/go.mo
  google.golang.org/protobuf v1.25.1-0.20200805231151-a709e31e5d12/go.mod h1:9JNX74DMeImyA3h4bdi1ymwjUzf21/xIlbajtzgsN7c=
  google.golang.org/protobuf v1.26.0-rc.1/go.mod h1:jlhhOSvTdKEhbULTjvd4ARK9grFBp09yW+WbY/TyQbw=
  google.golang.org/protobuf v1.26.0/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQnmE0givc=
@@ -234,6 +182,3 @@ index 3a050afc..2a9ee306 100644
  gopkg.in/alecthomas/kingpin.v2 v2.2.6/go.mod h1:FMv+mEhP44yOT+4EoQTLFTRgOQ1FBLkstjWtayDeSgw=
  gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
  gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
--- 
-2.35.1
-

@@ -1,8 +1,8 @@
-From 691abd3fdd0ec526dac81fcea81723f74f6cef46 Mon Sep 17 00:00:00 2001
+From e0df70b16d45883d8bf1f39e90b7111b93250466 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=E7=A7=8B=E3=81=AE=E3=81=8B=E3=81=88=E3=81=A7?=
  <autmaple@protonmail.com>
 Date: Tue, 5 Apr 2022 14:17:19 +0800
-Subject: [PATCH 2/2] Feat: use different qtls modules for different Go version
+Subject: [PATCH] Feat: use different qtls modules for different Go version
 
 ---
  common/protocol/quic/qtls_go116.go | 19 +++++++++++++++++++
@@ -15,9 +15,6 @@ Subject: [PATCH 2/2] Feat: use different qtls modules for different Go version
  create mode 100644 common/protocol/quic/qtls_go117.go
  create mode 100644 common/protocol/quic/qtls_go118.go
 
-diff --git a/common/protocol/quic/qtls_go116.go b/common/protocol/quic/qtls_go116.go
-new file mode 100644
-index 00000000..da849ea3
 --- /dev/null
 +++ b/common/protocol/quic/qtls_go116.go
 @@ -0,0 +1,19 @@
@@ -40,9 +37,6 @@ index 00000000..da849ea3
 +func AEADAESGCMTLS13(key, fixedNonce []byte) cipher.AEAD {
 +	return qtls.AEADAESGCMTLS13(key, fixedNonce)
 +}
-diff --git a/common/protocol/quic/qtls_go117.go b/common/protocol/quic/qtls_go117.go
-new file mode 100644
-index 00000000..08e8d483
 --- /dev/null
 +++ b/common/protocol/quic/qtls_go117.go
 @@ -0,0 +1,19 @@
@@ -65,9 +59,6 @@ index 00000000..08e8d483
 +func AEADAESGCMTLS13(key, fixedNonce []byte) cipher.AEAD {
 +	return qtls.AEADAESGCMTLS13(key, fixedNonce)
 +}
-diff --git a/common/protocol/quic/qtls_go118.go b/common/protocol/quic/qtls_go118.go
-new file mode 100644
-index 00000000..0bcacff2
 --- /dev/null
 +++ b/common/protocol/quic/qtls_go118.go
 @@ -0,0 +1,19 @@
@@ -90,8 +81,6 @@ index 00000000..0bcacff2
 +func AEADAESGCMTLS13(key, fixedNonce []byte) cipher.AEAD {
 +	return qtls.AEADAESGCMTLS13(key, fixedNonce)
 +}
-diff --git a/common/protocol/quic/sniff.go b/common/protocol/quic/sniff.go
-index 0a78050b..d0421309 100644
 --- a/common/protocol/quic/sniff.go
 +++ b/common/protocol/quic/sniff.go
 @@ -8,7 +8,6 @@ import (
@@ -115,7 +104,7 @@ index 0a78050b..d0421309 100644
  		Hash:   crypto.SHA256,
  	}
  	errNotQuic        = errors.New("not quic")
-@@ -153,7 +152,7 @@ func SniffQUIC(b []byte) (*SniffHeader, error) {
+@@ -153,7 +152,7 @@ func SniffQUIC(b []byte) (*SniffHeader,
  
  	key := hkdfExpandLabel(crypto.SHA256, secret, []byte{}, "quic key", 16)
  	iv := hkdfExpandLabel(crypto.SHA256, secret, []byte{}, "quic iv", 12)
@@ -124,8 +113,6 @@ index 0a78050b..d0421309 100644
  	nonce := cache.Extend(int32(cipher.NonceSize()))
  	binary.BigEndian.PutUint64(nonce[len(nonce)-8:], uint64(packetNumber))
  	decrypted, err := cipher.Open(b[extHdrLen:extHdrLen], nonce, data, b[:extHdrLen])
-diff --git a/go.mod b/go.mod
-index 87752bac..46a525bd 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -12,7 +12,9 @@ require (
@@ -147,6 +134,3 @@ index 87752bac..46a525bd 100644
  	github.com/nxadm/tail v1.4.8 // indirect
  	github.com/onsi/ginkgo v1.16.4 // indirect
  	github.com/pmezard/go-difflib v1.0.0 // indirect
--- 
-2.35.1
-
