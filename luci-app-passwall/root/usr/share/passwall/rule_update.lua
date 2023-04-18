@@ -6,7 +6,7 @@ local luci = luci
 local ucic = luci.model.uci.cursor()
 local jsonc = require "luci.jsonc"
 local name = 'passwall'
-local api = require ("luci.model.cbi." .. name .. ".api.api")
+local api = require ("luci.passwall.api")
 local arg1 = arg[1]
 
 local rule_path = "/usr/share/" .. name .. "/rules"
@@ -35,39 +35,29 @@ local geosite_api =  "https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/
 local v2ray_asset_location = ucic:get_first(name, 'global_rules', "v2ray_location_asset", "/usr/share/v2ray/")
 
 local log = function(...)
-    if arg1 then
-        local result = os.date("%Y-%m-%d %H:%M:%S: ") .. table.concat({...}, " ")
-        if arg1 == "log" then
-            local f, err = io.open("/tmp/log/passwall.log", "a")
-            if f and err == nil then
-                f:write(result .. "\n")
-                f:close()
-            end
-        elseif arg1 == "print" then
-            print(result)
-        end
-    end
-end
-
--- trim
-local function trim(text)
-    if not text or text == "" then return "" end
-    return (string.gsub(text, "^%s*(.-)%s*$", "%1"))
+	if arg1 then
+		if arg1 == "log" then
+			api.log(...)
+		elseif arg1 == "print" then
+			local result = os.date("%Y-%m-%d %H:%M:%S: ") .. table.concat({...}, " ")
+			print(result)
+		end
+	end
 end
 
 -- curl
-local function curl(url, file)
-	local cmd = "curl -skL -w %{http_code} --retry 3 --connect-timeout 3 '" .. url .. "'"
+local function curl(url, file, valifile)
+	local args = {
+		"-skL", "-w %{http_code}", "--retry 3", "--connect-timeout 3"
+	}
 	if file then
-		cmd = cmd .. " -o " .. file
+		args[#args + 1] = "-o " .. file
 	end
-	local stdout = luci.sys.exec(cmd)
-
-	if file then
-		return tonumber(trim(stdout))
-	else
-		return trim(stdout)
+	if valifile then
+		args[#args + 1] = "--dump-header " .. valifile
 	end
+	local return_code, result = api.curl_logic(url, nil, args)
+	return tonumber(result)
 end
 
 --check excluded domain
@@ -87,10 +77,22 @@ local function line_count(file_path)
 	return num;
 end
 
-local function non_file_check(file_path)
-	if nixio.fs.readfile(file_path, 1000) then
-		return nil;
+local function non_file_check(file_path, vali_file)
+	if nixio.fs.readfile(file_path, 10) then
+		local remote_file_size = tonumber(luci.sys.exec("cat " .. vali_file .. " | grep -i 'Content-Length' | awk '{print $2}'"))
+		local local_file_size = tonumber(nixio.fs.stat(file_path, "size"))
+		if remote_file_size and local_file_size then
+			if remote_file_size == local_file_size then
+				return nil;
+			else
+				log("下载文件大小校验出错，原始文件大小" .. remote_file_size .. "B，下载文件大小：" .. local_file_size .. "B。")
+				return true;
+			end
+		else
+			return nil;
+		end
 	else
+		log("下载文件读取出错。")
 		return true;
 	end
 end
@@ -101,16 +103,26 @@ local function fetch_rule(rule_name,rule_type,url,exclude_domain)
 	local sret_tmp = 0
 	local domains = {}
 	local file_tmp = "/tmp/" ..rule_name.. "_tmp"
+	local vali_file = "/tmp/" ..rule_name.. "_vali"
 	local download_file_tmp = "/tmp/" ..rule_name.. "_dl"
 	local unsort_file_tmp = "/tmp/" ..rule_name.. "_unsort"
 
 	log(rule_name.. " 开始更新...")
 	for k,v in ipairs(url) do
-		sret_tmp = curl(v, download_file_tmp..k)
-		if sret_tmp == 200 and non_file_check(download_file_tmp..k) then
-			sret = 0
-			log(rule_name.. " 第" ..k.. "条规则:" ..v.. "下载文件读取出错，请检查网络或下载链接后重试！")
-		elseif sret_tmp == 200 then
+		sret_tmp = curl(v, download_file_tmp..k, vali_file..k)
+		if sret_tmp == 200 and non_file_check(download_file_tmp..k, vali_file..k) then
+			log(rule_name.. " 第" ..k.. "条规则:" ..v.. "下载文件过程出错，尝试重新下载。")
+			os.remove(download_file_tmp..k)
+			os.remove(vali_file..k)
+			sret_tmp = curl(v, download_file_tmp..k, vali_file..k)
+			if sret_tmp == 200 and non_file_check(download_file_tmp..k, vali_file..k) then
+				sret = 0
+				sret_tmp = 0
+				log(rule_name.. " 第" ..k.. "条规则:" ..v.. "下载文件过程出错，请检查网络或下载链接后重试！")
+			end
+		end
+
+		if sret_tmp == 200 then
 			if rule_name == "gfwlist" then
 				local domains = {}
 				local gfwlist = io.open(download_file_tmp..k, "r")
@@ -168,6 +180,7 @@ local function fetch_rule(rule_name,rule_type,url,exclude_domain)
 			log(rule_name.. " 第" ..k.. "条规则:" ..v.. "下载失败，请检查网络或下载链接后重试！")
 		end
 		os.remove(download_file_tmp..k)
+		os.remove(vali_file..k)
 	end
 
 	if sret == 200 then
@@ -218,8 +231,8 @@ end
 local function fetch_geoip()
 	--请求geoip
 	xpcall(function()
-		local json_str = curl(geoip_api)
-		local json = jsonc.parse(json_str)
+		local return_code, content = api.curl_logic(geoip_api)
+		local json = jsonc.parse(content)
 		if json.tag_name and json.assets then
 			for _, v in ipairs(json.assets) do
 				if v.name and v.name == "geoip.dat.sha256sum" then
@@ -269,8 +282,8 @@ end
 local function fetch_geosite()
 	--请求geosite
 	xpcall(function()
-		local json_str = curl(geosite_api)
-		local json = jsonc.parse(json_str)
+		local return_code, content = api.curl_logic(geosite_api)
+		local json = jsonc.parse(content)
 		if json.tag_name and json.assets then
 			for _, v in ipairs(json.assets) do
 				if v.name and v.name == "geosite.dat.sha256sum" then
@@ -317,24 +330,26 @@ local function fetch_geosite()
 end
 
 if arg[2] then
-	if arg[2]:find("gfwlist") then
-		gfwlist_update = 1
-    end
-	if arg[2]:find("chnroute") then
-		chnroute_update = 1
-    end
-	if arg[2]:find("chnroute6") then
-		chnroute6_update = 1
-    end
-	if arg[2]:find("chnlist") then
-		chnlist_update = 1
-	end
-	if arg[2]:find("geoip") then
-		geoip_update = 1
-	end
-	if arg[2]:find("geosite") then
-		geosite_update = 1
-	end
+	string.gsub(arg[2], '[^' .. "," .. ']+', function(w)
+		if w == "gfwlist" then
+			gfwlist_update = 1
+		end
+		if w == "chnroute" then
+			chnroute_update = 1
+		end
+		if w == "chnroute6" then
+			chnroute6_update = 1
+		end
+		if w == "chnlist" then
+			chnlist_update = 1
+		end
+		if w == "geoip" then
+			geoip_update = 1
+		end
+		if w == "geosite" then
+			geosite_update = 1
+		end
+	end)
 else
 	gfwlist_update = ucic:get_first(name, 'global_rules', "gfwlist_update", 1)
 	chnroute_update = ucic:get_first(name, 'global_rules', "chnroute_update", 1)
