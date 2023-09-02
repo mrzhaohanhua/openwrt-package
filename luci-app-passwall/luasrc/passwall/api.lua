@@ -1,5 +1,6 @@
 module("luci.passwall.api", package.seeall)
 local com = require "luci.passwall.com"
+bin = require "nixio".bin
 fs = require "nixio.fs"
 sys = require "luci.sys"
 uci = require"luci.model.uci".cursor()
@@ -289,7 +290,7 @@ function get_valid_nodes()
 		e.id = e[".name"]
 		if e.type and e.remarks then
 			if e.protocol and (e.protocol == "_balancing" or e.protocol == "_shunt" or e.protocol == "_iface") then
-				e["remark"] = "%s：[%s] " % {i18n.translatef(e.type .. e.protocol), e.remarks}
+				e["remark"] = "%s：[%s] " % {e.type .. " " .. i18n.translatef(e.protocol), e.remarks}
 				e["node_type"] = "special"
 				nodes[#nodes + 1] = e
 			end
@@ -326,7 +327,7 @@ function get_node_remarks(n)
 	local remarks = ""
 	if n then
 		if n.protocol and (n.protocol == "_balancing" or n.protocol == "_shunt" or n.protocol == "_iface") then
-			remarks = "%s：[%s] " % {i18n.translatef(n.type .. n.protocol), n.remarks}
+			remarks = "%s：[%s] " % {n.type .. " " .. i18n.translatef(n.protocol), n.remarks}
 		else
 			local type2 = n.type
 			if (n.type == "V2ray" or n.type == "Xray") and n.protocol then
@@ -364,6 +365,10 @@ function gen_uuid(format)
 	return uuid
 end
 
+function gen_short_uuid()
+	return sys.exec("echo -n $(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 8)")
+end
+
 function uci_get_type(type, config, default)
 	local value = uci:get_first(appname, type, config, default) or sys.exec("echo -n $(uci -q get " .. appname .. ".@" .. type .."[0]." .. config .. ")")
 	if (value == nil or value == "") and (default and default ~= "") then
@@ -392,8 +397,12 @@ function get_customed_path(e)
 	return uci_get_type("global_app", e .. "_file")
 end
 
+function finded(e)
+	return luci.sys.exec('echo -n $(type -t -p "/bin/%s" -p "/usr/bin/%s" -p "%s" "%s" | head -n1)' % {e, e, get_customed_path(e), e})
+end
+
 function is_finded(e)
-	return luci.sys.exec('type -t -p "/bin/%s" -p "/usr/bin/%s" -p "%s" "%s"' % {e, e, get_customed_path(e), e}) ~= "" and true or false
+	return finded(e) ~= "" and true or false
 end
 
 function clone(org)
@@ -608,6 +617,44 @@ local function auto_get_arch()
 	end
 
 	return util.trim(arch)
+end
+
+function parseURL(url)
+	if not url or url == "" then
+		return nil
+	end
+	local pattern = "^(%w+)://"
+	local protocol = url:match(pattern)
+
+	if not protocol then
+		--error("Invalid URL: " .. url)
+		return nil
+	end
+
+	local auth_host_port = url:sub(#protocol + 4)
+	local auth_pattern = "^([^@]+)@"
+	local auth = auth_host_port:match(auth_pattern)
+	local username, password
+
+	if auth then
+		username, password = auth:match("^([^:]+):([^:]+)$")
+		auth_host_port = auth_host_port:sub(#auth + 2)
+	end
+
+	local host, port = auth_host_port:match("^([^:]+):(%d+)$")
+
+	if not host or not port then
+		--error("Invalid URL: " .. url)
+		return nil
+	end
+
+	return {
+		protocol = protocol,
+		username = username,
+		password = password,
+		host = host,
+		port = tonumber(port)
+	}
 end
 
 local default_file_tree = {
@@ -871,7 +918,6 @@ function to_check_self()
 	end
 	local local_version  = get_version()
 	local remote_version = sys.exec("echo -n $(grep 'PKG_VERSION' /tmp/passwall_makefile|awk -F '=' '{print $2}')")
-				.. "-" ..  sys.exec("echo -n $(grep 'PKG_RELEASE' /tmp/passwall_makefile|awk -F '=' '{print $2}')")
 
 	local has_update = compare_versions(local_version, "<", remote_version)
 	if not has_update then

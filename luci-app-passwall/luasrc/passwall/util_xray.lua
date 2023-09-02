@@ -102,9 +102,16 @@ function gen_outbound(flag, node, tag, proxy_table)
 
 		if node.protocol == "wireguard" and node.wireguard_reserved then
 			local bytes = {}
-			node.wireguard_reserved:gsub("[^,]+", function(b)
-				bytes[#bytes+1] = tonumber(b)
-			end)
+			if not node.wireguard_reserved:match("[^%d,]+") then
+				node.wireguard_reserved:gsub("%d+", function(b)
+					bytes[#bytes + 1] = tonumber(b)
+				end)
+			else
+				local result = api.bin.b64decode(node.wireguard_reserved)
+				for i = 1, #result do
+					bytes[i] = result:byte(i)
+				end
+			end
 			node.wireguard_reserved = #bytes > 0 and bytes or nil
 		end
 
@@ -314,14 +321,6 @@ function gen_config_server(node)
 				clients = clients
 			}
 		end
-	elseif node.protocol == "mtproto" then
-		settings = {
-			users = {
-				{
-					secret = (node.password == nil) and "" or node.password
-				}
-			}
-		}
 	elseif node.protocol == "dokodemo-door" then
 		settings = {
 			network = node.d_protocol,
@@ -374,10 +373,12 @@ function gen_config_server(node)
 				tag = "outbound",
 				streamSettings = {
 					sockopt = {
+						mark = 255,
 						interface = node.outbound_node_iface
 					}
 				}
 			}
+			sys.call("mkdir -p /tmp/etc/passwall/iface && touch /tmp/etc/passwall/iface/" .. node.outbound_node_iface)
 		else
 			local outbound_node_t = uci:get_all("passwall", node.outbound_node)
 			if node.outbound_node == "_socks" or node.outbound_node == "_http" then
@@ -537,7 +538,7 @@ function gen_config(var)
 				port = tonumber(local_socks_port),
 				protocol = "socks",
 				settings = {auth = "noauth", udp = true},
-				sniffing = {enabled = true, destOverride = {"http", "tls"}}
+				sniffing = {enabled = true, destOverride = {"http", "tls", "quic"}}
 			}
 			if local_socks_username and local_socks_password and local_socks_username ~= "" and local_socks_password ~= "" then
 				inbound.settings.auth = "password"
@@ -573,7 +574,7 @@ function gen_config(var)
 				protocol = "dokodemo-door",
 				settings = {network = "tcp,udp", followRedirect = true},
 				streamSettings = {sockopt = {tproxy = "tproxy"}},
-				sniffing = {enabled = sniffing and true or false, destOverride = {"http", "tls", (remote_dns_fake) and "fakedns"}, metadataOnly = false, routeOnly = route_only and true or nil, domainsExcluded = (sniffing and not route_only) and get_domain_excluded() or nil}
+				sniffing = {enabled = sniffing and true or false, destOverride = {"http", "tls", "quic", (remote_dns_fake) and "fakedns"}, metadataOnly = false, routeOnly = route_only and true or nil, domainsExcluded = (sniffing and not route_only) and get_domain_excluded() or nil}
 			}
 
 			if tcp_redir_port then
@@ -595,7 +596,7 @@ function gen_config(var)
 		end
 
 		local function get_balancer_tag(_node_id)
-			return "balancer-" .. _node_id:sub(1, 8)
+			return "balancer-" .. _node_id
 		end
 
 		local function gen_balancer(_node, loopbackTag)
@@ -604,7 +605,7 @@ function gen_config(var)
 			local valid_nodes = {}
 			for i = 1, length do
 				local blc_node_id = blc_nodes[i]
-				local blc_node_tag = "blc-" .. blc_node_id:sub(1, 8)
+				local blc_node_tag = "blc-" .. blc_node_id
 				local is_new_blc_node = true
 				for _, outbound in ipairs(outbounds) do
 					if outbound.tag == blc_node_tag then
@@ -667,7 +668,26 @@ function gen_config(var)
 			local preproxy_node_id = node["main_node"]
 			local preproxy_node = preproxy_enabled and preproxy_node_id and uci:get_all(appname, preproxy_node_id) or nil
 			local preproxy_is_balancer
-			if preproxy_node and api.is_normal_node(preproxy_node) then
+
+			if not preproxy_node and preproxy_node_id and api.parseURL(preproxy_node_id) then
+				local parsed1 = api.parseURL(preproxy_node_id)
+				local _node = {
+					type = "Xray",
+					protocol = parsed1.protocol,
+					username = parsed1.username,
+					password = parsed1.password,
+					address = parsed1.host,
+					port = parsed1.port,
+					transport = "tcp",
+					stream_security = "none"
+				}
+				local preproxy_outbound = gen_outbound(flag, _node, preproxy_tag)
+				if preproxy_outbound then
+					table.insert(outbounds, preproxy_outbound)
+				else
+					preproxy_enabled = false
+				end
+			elseif preproxy_node and api.is_normal_node(preproxy_node) then
 				local preproxy_outbound = gen_outbound(flag, preproxy_node, preproxy_tag)
 				if preproxy_outbound then
 					table.insert(outbounds, preproxy_outbound)
@@ -696,6 +716,23 @@ function gen_config(var)
 					rule_outboundTag = "blackhole"
 				elseif _node_id == "_default" and rule_name ~= "default" then
 					rule_outboundTag = "default"
+				elseif api.parseURL(_node_id) then
+					local parsed1 = api.parseURL(_node_id)
+					local _node = {
+						type = "Xray",
+						protocol = parsed1.protocol,
+						username = parsed1.username,
+						password = parsed1.password,
+						address = parsed1.host,
+						port = parsed1.port,
+						transport = "tcp",
+						stream_security = "none"
+					}
+					local _outbound = gen_outbound(flag, _node, rule_name)
+					if _outbound then
+						table.insert(outbounds, _outbound)
+						rule_outboundTag = rule_name
+					end
 				elseif _node_id ~= "nil" then
 					local _node = uci:get_all(appname, _node_id)
 					if not _node then return nil, nil end
@@ -775,6 +812,22 @@ function gen_config(var)
 								table.insert(balancers, balancer)
 								rule_balancerTag = balancer.tag
 							end
+						end
+					elseif _node.protocol == "_iface" then
+						if _node.iface then
+							local _outbound = {
+								protocol = "freedom",
+								tag = rule_name,
+								streamSettings = {
+									sockopt = {
+										mark = 255,
+										interface = _node.iface
+									}
+								}
+							}
+							table.insert(outbounds, _outbound)
+							rule_outboundTag = rule_name
+							sys.call("touch /tmp/etc/passwall/iface/" .. _node.iface)
 						end
 					end
 				end
@@ -869,10 +922,12 @@ function gen_config(var)
 						tag = "outbound",
 						streamSettings = {
 							sockopt = {
+								mark = 255,
 								interface = node.iface
 							}
 						}
 					}
+					sys.call("touch /tmp/etc/passwall/iface/" .. node.iface)
 				end
 			else
 				outbound = gen_outbound(flag, node)

@@ -26,7 +26,7 @@ s.addremove = true
 s.template = "cbi/tblsection"
 s.extedit = api.url("node_config", "%s")
 function s.create(e, t)
-	local uuid = api.gen_uuid()
+	local uuid = api.gen_short_uuid()
 	t = uuid
 	TypedSection.create(e, t)
 	luci.http.redirect(e.extedit:format(t))
@@ -36,6 +36,11 @@ function s.remove(e, t)
 	m.uci:foreach(appname, "socks", function(s)
 		if s["node"] == t then
 			m:del(s[".name"])
+		end
+		for k, v in ipairs(m:get(s[".name"], "autoswitch_backup_node") or {}) do
+			if v and v == t then
+				sys.call(string.format("uci -q del_list %s.%s.autoswitch_backup_node='%s'", appname, s[".name"], v))
+			end
 		end
 	end)
 	m.uci:foreach(appname, "haproxy_config", function(s)
@@ -51,11 +56,6 @@ function s.remove(e, t)
 			m:set(s[".name"], "udp_node", "default")
 		end
 	end)
-	for k, v in ipairs(m:get("@auto_switch[0]", "tcp_node") or {}) do
-		if v and v == t then
-			sys.call(string.format("uci -q del_list %s.@auto_switch[0].tcp_node='%s'", appname, v))
-		end
-	end
 	TypedSection.remove(e, t)
 	local new_node = "nil"
 	local node0 = m:get("@nodes[0]") or nil

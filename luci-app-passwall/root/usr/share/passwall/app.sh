@@ -13,6 +13,7 @@ TMP_ID_PATH=$TMP_PATH/id
 TMP_PORT_PATH=$TMP_PATH/port
 TMP_ROUTE_PATH=$TMP_PATH/route
 TMP_ACL_PATH=$TMP_PATH/acl
+TMP_IFACE_PATH=$TMP_PATH/iface
 TMP_PATH2=/tmp/etc/${CONFIG}_tmp
 DNSMASQ_PATH=/etc/dnsmasq.d
 TMP_DNSMASQ_PATH=/tmp/dnsmasq.d/passwall
@@ -24,7 +25,6 @@ DNS_PORT=15353
 TUN_DNS="127.0.0.1#${DNS_PORT}"
 LOCAL_DNS=119.29.29.29,223.5.5.5
 DEFAULT_DNS=
-IFACES=
 ENABLED_DEFAULT_ACL=0
 PROXY_IPV6=0
 PROXY_IPV6_UDP=0
@@ -37,6 +37,7 @@ UTIL_XRAY=$LUA_UTIL_PATH/util_xray.lua
 UTIL_TROJAN=$LUA_UTIL_PATH/util_trojan.lua
 UTIL_NAIVE=$LUA_UTIL_PATH/util_naiveproxy.lua
 UTIL_HYSTERIA=$LUA_UTIL_PATH/util_hysteria.lua
+UTIL_TUIC=$LUA_UTIL_PATH/util_tuic.lua
 
 echolog() {
 	local d="$(date "+%Y-%m-%d %H:%M:%S")"
@@ -57,6 +58,11 @@ config_t_get() {
 	local index=${4:-0}
 	local ret=$(uci -q get "${CONFIG}.@${1}[${index}].${2}" 2>/dev/null)
 	echo "${ret:=${3}}"
+}
+
+config_t_set() {
+	local index=${4:-0}
+	local ret=$(uci -q set "${CONFIG}.@${1}[${index}].${2}=${3}" 2>/dev/null)
 }
 
 get_enabled_anonymous_secs() {
@@ -195,6 +201,19 @@ check_port_exists() {
 		result=$(netstat -tuln | grep -c ":$port ")
 	fi
 	echo "${result}"
+}
+
+check_depends() {
+	local tables=${1}
+	if [ "$tables" == "iptables" ]; then
+		for depends in "iptables-mod-tproxy" "iptables-mod-socket" "iptables-mod-iprange" "iptables-mod-conntrack-extra" "kmod-ipt-nat"; do
+			[ -z "$(opkg status ${depends} 2>/dev/null | grep 'Status' | awk -F ': ' '{print $2}' 2>/dev/null)" ] && echolog "$tables透明代理基础依赖 $depends 未安装..."
+		done
+	else
+		for depends in "kmod-nft-socket" "kmod-nft-tproxy" "kmod-nft-nat"; do
+			[ -z "$(opkg status ${depends} 2>/dev/null | grep 'Status' | awk -F ': ' '{print $2}' 2>/dev/null)" ] && echolog "$tables透明代理基础依赖 $depends 未安装..."
+		done
+	fi
 }
 
 get_new_port() {
@@ -377,10 +396,6 @@ run_v2ray() {
 	_extra_param="${_extra_param} -loglevel $loglevel"
 	lua $UTIL_XRAY gen_config ${_extra_param} > $config_file
 	ln_run "$(first_type $(config_t_get global_app ${type}_file) ${type})" ${type} $log_file run -c "$config_file"
-	local protocol=$(config_n_get $node protocol)
-	[ "$protocol" == "_iface" ] && {
-		IFACES="$IFACES $(config_n_get $node iface)"
-	}
 }
 
 run_dns2socks() {
@@ -416,14 +431,22 @@ run_chinadns_ng() {
 		[ -s "${RULES_PATH}/chnlist" ] && {
 			local _chnlist_file="${TMP_PATH}/chinadns_chnlist"
 			cp -a "${RULES_PATH}/chnlist" "${_chnlist_file}"
-			_extra_param="${_extra_param} -m ${_chnlist_file} -M -a"
+			local chnroute4_set="passwall_chnroute"
+			local chnroute6_set="passwall_chnroute6"
+			[ "$nftflag" = "1" ] && {
+				chnroute4_set="inet@fw4@passwall_chnroute"
+				chnroute6_set="inet@fw4@passwall_chnroute6"
+			}
+			_extra_param="${_extra_param} -4 ${chnroute4_set} -6 ${chnroute6_set} -m ${_chnlist_file} -M -a"
 		}
 	}
 	
 	([ -n "$_chnlist" ] || [ -n "$_gfwlist" ]) && [ -s "${RULES_PATH}/gfwlist" ] && {
 		local _gfwlist_file="${TMP_PATH}/chinadns_gfwlist"
 		cp -a "${RULES_PATH}/gfwlist" "${_gfwlist_file}"
-		_extra_param="${_extra_param} -g ${_gfwlist_file}"
+		local gfwlist_set="passwall_gfwlist,passwall_gfwlist6"
+		[ "$nftflag" = "1" ] && gfwlist_set="inet@fw4@passwall_gfwlist,inet@fw4@passwall_gfwlist6"
+		_extra_param="${_extra_param} -g ${_gfwlist_file} -A ${gfwlist_set}"
 		#当只有使用gfwlist模式时设置默认DNS为本地直连
 		[ -n "$_gfwlist" ] && [ -z "$_chnlist" ] && _default_tag="chn"
 	}
@@ -564,6 +587,10 @@ run_socks() {
 		lua $UTIL_HYSTERIA gen_config -node $node -local_socks_port $socks_port -server_host $server_host -server_port $port ${_extra_param} > $config_file
 		ln_run "$(first_type $(config_t_get global_app hysteria_file))" "hysteria" $log_file -c "$config_file" client
 	;;
+	tuic)
+		lua $UTIL_TUIC gen_config -node $node -local_addr $bind -local_port $socks_port -server_host $server_host -server_port $port > $config_file
+		ln_run "$(first_type tuic-client)" "tuic-client" $log_file -c "$config_file"
+	;;
 	esac
 
 	# http to socks
@@ -662,6 +689,9 @@ run_redir() {
 		hysteria)
 			lua $UTIL_HYSTERIA gen_config -node $node -local_udp_redir_port $local_port > $config_file
 			ln_run "$(first_type $(config_t_get global_app hysteria_file))" "hysteria" $log_file -c "$config_file" client
+		;;
+		tuic)
+			echolog "TUIC不支持UDP转发！"
 		;;
 		esac
 	;;
@@ -899,56 +929,6 @@ run_redir() {
 	return 0
 }
 
-node_switch() {
-	local flag new_node shunt_logic log_output
-	eval_set_val $@
-	[ -n "$flag" ] && [ -n "$new_node" ] && {
-		flag=$(echo $flag | tr 'A-Z' 'a-z')
-		FLAG=$(echo $flag | tr 'a-z' 'A-Z')
-		[ -n "$log_output" ] || LOG_FILE="/dev/null"
-		local node=$2
-		pgrep -af "${TMP_PATH}" | awk -v P1="${FLAG}" 'BEGIN{IGNORECASE=1}$0~P1 && !/acl\/|acl_/{print $1}' | xargs kill -9 >/dev/null 2>&1
-		rm -rf $TMP_PATH/${FLAG}*
-		local config_file="${FLAG}.json"
-		local log_file="${FLAG}.log"
-		local port=$(cat $TMP_PORT_PATH/${FLAG})
-
-		[ "$shunt_logic" != "0" ] && {
-			local node=$(config_t_get global ${flag}_node nil)
-			[ "$(config_n_get $node protocol nil)" = "_shunt" ] && {
-				if [ "$shunt_logic" = "1" ]; then
-					uci set $CONFIG.$node.default_node="$new_node"
-				elif [ "$shunt_logic" = "2" ]; then
-					uci set $CONFIG.$node.main_node="$new_node"
-				fi
-				uci commit $CONFIG
-			}
-			new_node=$node
-		}
-
-		run_redir node=$new_node proto=$FLAG bind=0.0.0.0 local_port=$port config_file=$config_file log_file=$log_file
-		echo $new_node > $TMP_ID_PATH/${FLAG}
-
-		[ "$shunt_logic" != "0" ] && [ "$(config_n_get $new_node protocol nil)" = "_shunt" ] && {
-			echo $(config_n_get $new_node default_node nil) > $TMP_ID_PATH/${FLAG}_default
-			echo $(config_n_get $new_node main_node nil) > $TMP_ID_PATH/${FLAG}_main
-			uci commit $CONFIG
-		}
-
-		[ "$flag" = "tcp" ] && {
-			[ "$(config_t_get global udp_node nil)" = "tcp" ] && [ "$UDP_REDIR_PORT" != "$TCP_REDIR_PORT" ] && {
-				pgrep -af "$TMP_PATH" | awk 'BEGIN{IGNORECASE=1}/UDP/ && !/acl\/|acl_/{print $1}' | xargs kill -9 >/dev/null 2>&1
-				UDP_NODE=$new_node
-				start_redir UDP
-			}
-		}
-
-		#uci set $CONFIG.@global[0].${flag}_node=$new_node
-		#uci commit $CONFIG
-		source $APP_PATH/helper_${DNS_N}.sh logic_restart no_log=1
-	}
-}
-
 start_redir() {
 	local proto=${1}
 	eval node=\$${proto}_NODE
@@ -991,9 +971,36 @@ start_socks() {
 				local http_port=$(config_n_get $id http_port 0)
 				local http_config_file="HTTP2SOCKS_${id}.json"
 				run_socks flag=$id node=$node bind=0.0.0.0 socks_port=$port config_file=$config_file http_port=$http_port http_config_file=$http_config_file
-				echo $node > $TMP_ID_PATH/SOCKS_${id}
+				echo $node > $TMP_ID_PATH/socks_${id}
+
+				#自动切换逻辑
+				local enable_autoswitch=$(config_n_get $id enable_autoswitch 0)
+				[ "$enable_autoswitch" = "1" ] && $APP_PATH/socks_auto_switch.sh ${id} > /dev/null 2>&1 &
 			done
 		}
+	}
+}
+
+socks_node_switch() {
+	local flag new_node
+	eval_set_val $@
+	[ -n "$flag" ] && [ -n "$new_node" ] && {
+		pgrep -af "$TMP_BIN_PATH" | awk -v P1="${flag}" 'BEGIN{IGNORECASE=1}$0~P1 && !/acl\/|acl_/{print $1}' | xargs kill -9 >/dev/null 2>&1
+		rm -rf $TMP_PATH/SOCKS_${flag}*
+		rm -rf $TMP_PATH/HTTP2SOCKS_${flag}*
+
+		for filename in $(ls ${TMP_SCRIPT_FUNC_PATH}); do
+			cmd=$(cat ${TMP_SCRIPT_FUNC_PATH}/${filename})
+			[ -n "$(echo $cmd | grep "${flag}")" ] && rm -f ${TMP_SCRIPT_FUNC_PATH}/${filename}
+		done
+		local port=$(config_n_get $flag port)
+		local config_file="SOCKS_${flag}.json"
+		local log_file="SOCKS_${flag}.log"
+		local http_port=$(config_n_get $flag http_port 0)
+		local http_config_file="HTTP2SOCKS_${flag}.json"
+		LOG_FILE="/dev/null"
+		run_socks flag=$flag node=$new_node bind=0.0.0.0 socks_port=$port config_file=$config_file http_port=$http_port http_config_file=$http_config_file
+		echo $new_node > $TMP_ID_PATH/socks_${flag}
 	}
 }
 
@@ -1076,9 +1083,6 @@ start_crontab() {
 	if [ "$ENABLED_DEFAULT_ACL" == 1 ] || [ "$ENABLED_ACLS" == 1 ]; then
 		start_daemon=$(config_t_get global_delay start_daemon 0)
 		[ "$start_daemon" = "1" ] && $APP_PATH/monitor.sh > /dev/null 2>&1 &
-
-		AUTO_SWITCH_ENABLE=$(config_t_get auto_switch enable 0)
-		[ "$AUTO_SWITCH_ENABLE" = "1" ] && $APP_PATH/test.sh > /dev/null 2>&1 &
 	else
 		echolog "运行于非代理模式，仅允许服务启停的定时任务。"
 	fi
@@ -1389,7 +1393,7 @@ acl_app() {
 							lua $APP_PATH/helper_dnsmasq_add.lua -FLAG ${sid} -TMP_DNSMASQ_PATH $TMP_ACL_PATH/$sid/dnsmasq.d \
 								-DNSMASQ_CONF_FILE $TMP_ACL_PATH/$sid/dnsmasq.conf -DEFAULT_DNS $DEFAULT_DNS -LOCAL_DNS $LOCAL_DNS \
 								-TUN_DNS "127.0.0.1#${_dns_port}" -REMOTE_FAKEDNS 0 -CHNROUTE_MODE_DEFAULT_DNS "${when_chnroute_default_dns:-direct}" -CHINADNS_DNS ${_china_ng_listen:-0} \
-								-TCP_NODE $tcp_node -PROXY_MODE ${tcp_proxy_mode} -NO_PROXY_IPV6 ${_dnsmasq_filter_ipv6:-0} -NFTFLAG 0 \
+								-TCP_NODE $tcp_node -PROXY_MODE ${tcp_proxy_mode} -NO_PROXY_IPV6 ${_dnsmasq_filter_ipv6:-0} -NFTFLAG ${nftflag:-0} \
 								-NO_LOGIC_LOG 1
 							ln_run "$(first_type dnsmasq)" "dnsmasq_${sid}" "/dev/null" -C $TMP_ACL_PATH/$sid/dnsmasq.conf -x $TMP_ACL_PATH/$sid/dnsmasq.pid
 							eval node_${tcp_node}_$(echo -n "${tcp_proxy_mode}${remote_dns}" | md5sum | cut -d " " -f1)=${dnsmasq_port}
@@ -1415,25 +1419,25 @@ acl_app() {
 								redir_port=$(get_new_port $(expr $redir_port + 1))
 								eval node_${tcp_node}_redir_port=$redir_port
 								tcp_port=$redir_port
-								config_file="acl/${tcp_node}_SOCKS_${socks_port}.json"
 
 								local type=$(echo $(config_n_get $tcp_node type) | tr 'A-Z' 'a-z')
 								if [ -n "${type}" ] && ([ "${type}" = "v2ray" ] || [ "${type}" = "xray" ]); then
-									config_file=$(echo $config_file | sed "s/SOCKS/TCP_SOCKS/g")
+									config_file="acl/${tcp_node}_TCP_${redir_port}.json"
 									_extra_param="socks_address=127.0.0.1 socks_port=$socks_port"
 									if [ "$dns_mode" = "v2ray" -o "$dns_mode" = "xray" ]; then
-										config_file=$(echo $config_file | sed "s/TCP_/DNS_TCP_/g")
 										dns_port=$(get_new_port $(expr $dns_port + 1))
 										_dns_port=$dns_port
+										config_file=$(echo $config_file | sed "s/TCP_/DNS_${_dns_port}_TCP_/g")
 										_extra_param="dns_listen_port=${_dns_port} remote_dns_protocol=${v2ray_dns_mode} remote_dns_tcp_server=${remote_dns} remote_dns_doh=${remote_dns} dns_client_ip=${dns_client_ip} dns_query_strategy=${DNS_QUERY_STRATEGY}"
 									fi
-									[ "$udp_node" != "nil" ] && [ "$udp_node" = "tcp" ] && {
+									[ "$udp_node" != "nil" ] && ([ "$udp_node" = "tcp" ] || [ "$udp_node" = "$tcp_node" ]) && {
 										config_file=$(echo $config_file | sed "s/TCP_/TCP_UDP_/g")
 										_extra_param="${_extra_param} udp_redir_port=$redir_port"
 									}
 									config_file="$TMP_PATH/$config_file"
 									run_v2ray flag=$tcp_node node=$tcp_node tcp_redir_port=$redir_port ${_extra_param} config_file=$config_file
 								else
+									config_file="acl/${tcp_node}_SOCKS_${socks_port}.json"
 									run_socks flag=$tcp_node node=$tcp_node bind=127.0.0.1 socks_port=$socks_port config_file=$config_file
 									local log_file=$TMP_ACL_PATH/ipt2socks_${tcp_node}_${redir_port}.log
 									log_file="/dev/null"
@@ -1460,6 +1464,9 @@ acl_app() {
 						udp_node=$UDP_NODE
 						udp_port=$UDP_REDIR_PORT
 					fi
+				elif [ "$udp_node" = "$tcp_node" ]; then
+					udp_node=$tcp_node
+					udp_port=$tcp_port
 				else
 					[ "$(config_get_type $udp_node nil)" = "nodes" ] && {
 						if [ "$udp_node" = "$UDP_NODE" ]; then
@@ -1476,14 +1483,14 @@ acl_app() {
 								redir_port=$(get_new_port $(expr $redir_port + 1))
 								eval node_${udp_node}_redir_port=$redir_port
 								udp_port=$redir_port
-								config_file="acl/${udp_node}_SOCKS_${socks_port}.json"
 
 								local type=$(echo $(config_n_get $udp_node type) | tr 'A-Z' 'a-z')
 								if [ -n "${type}" ] && ([ "${type}" = "v2ray" ] || [ "${type}" = "xray" ]); then
-									config_file=$(echo $config_file | sed "s/SOCKS/TCP_UDP_SOCKS/g")
+									config_file="acl/${udp_node}_UDP_${redir_port}.json"
 									config_file="$TMP_PATH/$config_file"
 									run_v2ray flag=$udp_node node=$udp_node udp_redir_port=$redir_port config_file=$config_file
 								else
+									config_file="acl/${udp_node}_SOCKS_${socks_port}.json"
 									run_socks flag=$udp_node node=$udp_node bind=127.0.0.1 socks_port=$socks_port config_file=$config_file
 									local log_file=$TMP_ACL_PATH/ipt2socks_${udp_node}_${redir_port}.log
 									log_file="/dev/null"
@@ -1514,16 +1521,30 @@ start() {
 	nftflag=0
 	local use_nft=$(config_t_get global_forwarding use_nft 0)
 	local USE_TABLES
-	if [ "$use_nft" == 1 ] && [ -z "$(dnsmasq --version | grep 'Compile time options:.* nftset')" ]; then
-		echolog "Dnsmasq软件包不满足nftables透明代理要求，如需使用请确保dnsmasq版本在2.87以上并开启nftset支持。"
-	elif [ "$use_nft" == 1 ] && [ -n "$(dnsmasq --version | grep 'Compile time options:.* nftset')" ]; then
-		USE_TABLES="nftables"
-		nftflag=1
-	elif [ -z "$(command -v iptables-legacy || command -v iptables)" ] || [ -z "$(command -v ipset)" ]; then
-		echolog "系统未安装iptables或ipset，无法透明代理！"
+	if [ "$use_nft" == 0 ]; then
+		if [ -z "$(command -v iptables-legacy || command -v iptables)" ] || [ -z "$(command -v ipset)" ] || [ -z "$(dnsmasq --version | grep 'Compile time options:.* ipset')" ]; then
+			if [ -n "$(command -v nft)" ] && [ -n "$(dnsmasq --version | grep 'Compile time options:.* nftset')" ]; then
+				echolog "检测到fw4，使用nftables进行透明代理。"
+				USE_TABLES="nftables"
+				nftflag=1
+				config_t_set global_forwarding use_nft 1
+				uci commit
+			else
+				echolog "系统未安装iptables或ipset或Dnsmasq没有开启ipset支持，无法透明代理！"
+			fi
+		else
+			USE_TABLES="iptables"
+		fi
 	else
-		USE_TABLES="iptables"
+		if [ -z "$(dnsmasq --version | grep 'Compile time options:.* nftset')" ]; then
+			echolog "Dnsmasq软件包不满足nftables透明代理要求，如需使用请确保dnsmasq版本在2.87以上并开启nftset支持。"
+		elif [ -n "$(dnsmasq --version | grep 'Compile time options:.* nftset')" ]; then
+			USE_TABLES="nftables"
+			nftflag=1
+		fi
 	fi
+
+	check_depends $USE_TABLES
 
 	[ "$ENABLED_DEFAULT_ACL" == 1 ] && {
 		start_redir TCP
@@ -1552,7 +1573,7 @@ stop() {
 	[ -s "$TMP_PATH/bridge_nf_ipt" ] && sysctl -w net.bridge.bridge-nf-call-iptables=$(cat $TMP_PATH/bridge_nf_ipt) >/dev/null 2>&1
 	[ -s "$TMP_PATH/bridge_nf_ip6t" ] && sysctl -w net.bridge.bridge-nf-call-ip6tables=$(cat $TMP_PATH/bridge_nf_ip6t) >/dev/null 2>&1
 	rm -rf ${TMP_PATH}
-	rm -rf /tmp/lock/${CONFIG}_script.lock
+	rm -rf /tmp/lock/${CONFIG}_socks_auto_switch*
 	echolog "清空并关闭相关程序和缓存完成。"
 	exit 0
 }
@@ -1621,7 +1642,7 @@ DNS_QUERY_STRATEGY="UseIPv4"
 
 export V2RAY_LOCATION_ASSET=$(config_t_get global_rules v2ray_location_asset "/usr/share/v2ray/")
 export XRAY_LOCATION_ASSET=$V2RAY_LOCATION_ASSET
-mkdir -p /tmp/etc $TMP_PATH $TMP_BIN_PATH $TMP_SCRIPT_FUNC_PATH $TMP_ID_PATH $TMP_PORT_PATH $TMP_ROUTE_PATH $TMP_ACL_PATH $TMP_PATH2
+mkdir -p /tmp/etc $TMP_PATH $TMP_BIN_PATH $TMP_SCRIPT_FUNC_PATH $TMP_ID_PATH $TMP_PORT_PATH $TMP_ROUTE_PATH $TMP_ACL_PATH $TMP_IFACE_PATH $TMP_PATH2
 
 arg1=$1
 shift
@@ -1638,8 +1659,8 @@ run_socks)
 run_redir)
 	run_redir $@
 	;;
-node_switch)
-	node_switch $@
+socks_node_switch)
+	socks_node_switch $@
 	;;
 echolog)
 	echolog $@
