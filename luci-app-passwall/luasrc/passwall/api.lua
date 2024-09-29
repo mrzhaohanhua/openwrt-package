@@ -10,10 +10,11 @@ jsonc = require "luci.jsonc"
 i18n = require "luci.i18n"
 
 appname = "passwall"
-curl_args = { "-skfL", "--connect-timeout 3", "--retry 3", "-m 60" }
+curl_args = { "-skfL", "--connect-timeout 3", "--retry 3" }
 command_timeout = 300
 OPENWRT_ARCH = nil
 DISTRIB_ARCH = nil
+OPENWRT_BOARD = nil
 
 LOG_FILE = "/tmp/log/" .. appname .. ".log"
 CACHE_PATH = "/tmp/etc/" .. appname .. "_tmp"
@@ -73,7 +74,7 @@ end
 
 function curl_proxy(url, file, args)
 	--使用代理
-	local socks_server = luci.sys.exec("[ -f /tmp/etc/passwall/TCP_SOCKS_server ] && echo -n $(cat /tmp/etc/passwall/TCP_SOCKS_server) || echo -n ''")
+	local socks_server = luci.sys.exec("[ -f /tmp/etc/passwall/acl/default/TCP_SOCKS_server ] && echo -n $(cat /tmp/etc/passwall/acl/default/TCP_SOCKS_server) || echo -n ''")
 	if socks_server ~= "" then
 		if not args then args = {} end
 		local tmp_args = clone(args)
@@ -307,13 +308,15 @@ function get_domain_from_url(url)
 end
 
 function get_valid_nodes()
-	local nodes_ping = uci_get_type("global_other", "nodes_ping") or ""
+	local show_node_info = uci_get_type("global_other", "show_node_info") or "0"
 	local nodes = {}
 	uci:foreach(appname, "nodes", function(e)
 		e.id = e[".name"]
 		if e.type and e.remarks then
 			if e.protocol and (e.protocol == "_balancing" or e.protocol == "_shunt" or e.protocol == "_iface") then
-				e["remark"] = "%s：[%s] " % {e.type .. " " .. i18n.translatef(e.protocol), e.remarks}
+				local type = e.type
+				if type == "sing-box" then type = "Sing-Box" end
+				e["remark"] = "%s：[%s] " % {type .. " " .. i18n.translatef(e.protocol), e.remarks}
 				e["node_type"] = "special"
 				nodes[#nodes + 1] = e
 			end
@@ -327,14 +330,25 @@ function get_valid_nodes()
 							protocol = "VMess"
 						elseif protocol == "vless" then
 							protocol = "VLESS"
+						elseif protocol == "shadowsocks" then
+							protocol = "SS"
+						elseif protocol == "shadowsocksr" then
+							protocol = "SSR"
+						elseif protocol == "wireguard" then
+							protocol = "WG"
+						elseif protocol == "hysteria" then
+							protocol = "HY"
+						elseif protocol == "hysteria2" then
+							protocol = "HY2"
 						else
 							protocol = protocol:gsub("^%l",string.upper)
 						end
+						if type == "sing-box" then type = "Sing-Box" end
 						type = type .. " " .. protocol
 					end
 					if is_ipv6(address) then address = get_ipv6_full(address) end
 					e["remark"] = "%s：[%s]" % {type, e.remarks}
-					if nodes_ping:find("info") then
+					if show_node_info == "1" then
 						e["remark"] = "%s：[%s] %s:%s" % {type, e.remarks, address, e.port}
 					end
 					e.node_type = "normal"
@@ -620,7 +634,9 @@ local function auto_get_arch()
 	local arch = nixio.uname().machine or ""
 	if not OPENWRT_ARCH and fs.access("/usr/lib/os-release") then
 		OPENWRT_ARCH = sys.exec("echo -n $(grep 'OPENWRT_ARCH' /usr/lib/os-release | awk -F '[\\042\\047]' '{print $2}')")
+		OPENWRT_BOARD = sys.exec("echo -n $(grep 'OPENWRT_BOARD' /usr/lib/os-release | awk -F '[\\042\\047]' '{print $2}')")
 		if OPENWRT_ARCH == "" then OPENWRT_ARCH = nil end
+		if OPENWRT_BOARD == "" then OPENWRT_BOARD = nil end
 	end
 	if not DISTRIB_ARCH and fs.access("/etc/openwrt_release") then
 		DISTRIB_ARCH = sys.exec("echo -n $(grep 'DISTRIB_ARCH' /etc/openwrt_release | awk -F '[\\042\\047]' '{print $2}')")
@@ -649,6 +665,10 @@ local function auto_get_arch()
 				arch = "armv5"
 			end
 		end
+	end
+
+	if arch == "aarch64" and OPENWRT_BOARD and OPENWRT_BOARD:match("rockchip") ~= nil then
+		arch = "rockchip"
 	end
 
 	return util.trim(arch)
@@ -696,8 +716,10 @@ local default_file_tree = {
 	x86_64  = "amd64",
 	x86     = "386",
 	aarch64 = "arm64",
+	rockchip = "arm64",
 	mips    = "mips",
-	mipsel  = "mipsle",
+	mips64  = "mips64",
+	mipsel  = "mipsel",
 	armv5   = "arm.*5",
 	armv6   = "arm.*6[^4]*",
 	armv7   = "arm.*7",
@@ -762,7 +784,7 @@ function to_check(arch, app_name)
 		remote_version = remote_version:gsub(com[app_name].remote_version_str_replace, "")
 	end
 	local has_update = compare_versions(local_version:match("[^v]+"), "<", remote_version:match("[^v]+"))
-
+--[[
 	if not has_update then
 		return {
 			code = 0,
@@ -770,7 +792,7 @@ function to_check(arch, app_name)
 			remote_version = remote_version
 		}
 	end
-
+]]--
 	local asset = {}
 	for _, v in ipairs(json.assets) do
 		if v.name and v.name:match(match_file_name) then
@@ -791,7 +813,7 @@ function to_check(arch, app_name)
 
 	return {
 		code = 0,
-		has_update = true,
+		has_update = has_update,
 		local_version = local_version,
 		remote_version = remote_version,
 		html_url = json.html_url,
@@ -820,7 +842,10 @@ function to_download(app_name, url, size)
 		end
 	end
 
-	local return_code, result = curl_logic(url, tmp_file, curl_args)
+	local _curl_args = clone(curl_args)
+	table.insert(_curl_args, "-m 60")
+
+	local return_code, result = curl_logic(url, tmp_file, _curl_args)
 	result = return_code == 0
 
 	if not result then
@@ -919,7 +944,7 @@ function to_move(app_name,file)
 		sys.call(cmd_rm_tmp)
 		return {
 			code = 1,
-			error = i18n.translate("The client file is not suitable for current device.")..app_name.."__"..bin_path
+			error = i18n.translate("The client file is not suitable for current device.") .. app_name .. "__" .. bin_path
 		}
 	end
 
@@ -978,6 +1003,7 @@ function to_check_self()
 	end
 	local local_version  = get_version()
 	local remote_version = sys.exec("echo -n $(grep 'PKG_VERSION' /tmp/passwall_makefile|awk -F '=' '{print $2}')")
+	exec("/bin/rm", {"-f", tmp_file})
 
 	local has_update = compare_versions(local_version, "<", remote_version)
 	if not has_update then
@@ -994,22 +1020,6 @@ function to_check_self()
 		remote_version = remote_version,
 		error = i18n.translatef("The latest version: %s, currently does not support automatic update, if you need to update, please compile or download the ipk and then manually install.", remote_version)
 	}
-end
-
-function is_js_luci()
-	return sys.call('[ -f "/www/luci-static/resources/uci.js" ]') == 0
-end
-
-function set_apply_on_parse(map)
-	if is_js_luci() == true then
-		map.apply_on_parse = false
-		map.on_after_apply = function(self)
-			if self.redirect then
-				os.execute("sleep 1")
-				luci.http.redirect(self.redirect)
-			end
-		end
-	end
 end
 
 function luci_types(id, m, s, type_name, option_prefix)
